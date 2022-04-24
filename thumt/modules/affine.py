@@ -13,6 +13,9 @@ import thumt.utils as utils
 from thumt.modules.module import Module
 
 
+# y = xA^T + b
+# A^T = weight
+# b = bias
 class Affine(Module):
 
     def __init__(self, in_features, out_features, bias=True, name="affine"):
