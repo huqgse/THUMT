@@ -78,31 +78,31 @@ class DeepLSTMDecoderLayer(nn.Module):
                                          params.hidden_size,
                                          normalization=params.lstm_normalization)
 
-    def __attention(self, query, memory):
+    def __attention(self, query, bias, memory=None):
         # query: [length, batch, hidden_size] -> [batch, length, hidden_size]
         # memory: [length, batch, hidden_size] -> [batch, length, hidden_size]
         query = torch.transpose(query, 0, 1)
         memory = torch.transpose(memory, 0, 1)
 
         # c: [batch, length, hidden_size]
-        c = self.src_attention(query, None, memory)
+        c = self.src_attention(query, bias, memory)
 
         # c: [batch, length, hidden_size] -> [length, batch, hidden_size]
         return torch.transpose(c, 0, 1)
 
-    def forward(self, x, memory, state=None):
+    def forward(self, x, src_bias, tgt_bias, memory=None, state=None):
         step = x.size(0)
         batch = x.size(1)
         channel = x.size(2)
+
+        # TODO: tgt-attention
+        # TODO: mask
 
         # src-attention
         # x: [length, batch, hidden_size]
         # memory: [length, batch, hidden_size]
         # c: [length, batch, hidden_size]
-        c = self.__attention(x, memory)
-
-        # TODO: tgt-attention
-        # TODO: mask
+        c = self.__attention(x, src_bias, memory)
 
         if state is None:
             h_zeros = torch.zeros(
@@ -168,7 +168,7 @@ class DeepLSTMDecoder(modules.Module):
                 DeepLSTMDecoderLayer(params, name="decoder_layer_%d" % i)
                 for i in range(params.num_decoder_layers)])
 
-    def forward(self, x, memory, batch_first=False):
+    def forward(self, x, src_bias, tgt_bias, memory=None, batch_first=False):
         if batch_first:
             # x: [batch, length, hidden_size] -> [length, batch, hidden_size]
             x = torch.transpose(x, 0, 1)
@@ -177,7 +177,7 @@ class DeepLSTMDecoder(modules.Module):
 
         state = None
         for i in range(len(self.layers)):
-            x, state = self.layers[i](x, memory, state)
+            x, state = self.layers[i](x, src_bias, tgt_bias, memory, state)
 
         if batch_first:
             # x: [length, batch, hidden_size] -> [batch, length, hidden_size]
@@ -234,31 +234,26 @@ class DeepLSTM(modules.Module):
         nn.init.normal_(self.softmax_weights, mean=0.0,
                         std=self.params.hidden_size ** -0.5)
 
-    def encode(self, features):
+    def encode(self, features, state):
         src_seq = features["source"]
-        # src_mask = features["source_mask"]
-        # enc_attn_bias = self.masking_bias(src_mask)
 
         inputs = torch.nn.functional.embedding(src_seq, self.src_embedding)
         inputs = inputs * (self.hidden_size ** 0.5)
         inputs = inputs + self.embedding_bias
 
-        # inputs = nn.functional.dropout(
-        #     self.encoder(inputs), self.dropout, self.training)
-        # enc_attn_bias = enc_attn_bias.to(inputs)
-
         # inputs: [batch, length, hidden_size]
         encoder_output = self.encoder(inputs, batch_first=True)
 
-        # state["enc_attn_bias"] = enc_attn_bias
+        state["encoder_output"] = encoder_output
 
-        return encoder_output
+        return state
 
-    def decode(self, features, encoder_output, mode="infer"):
+    def decode(self, features, state, mode="infer"):
         tgt_seq = features["target"]
+        src_mask = features["source_mask"]
 
-        # enc_attn_bias = state["enc_attn_bias"]
-        # dec_attn_bias = self.causal_bias(tgt_seq.shape[1])
+        src_bias = self.masking_bias(src_mask)
+        tgt_bias = self.causal_bias(tgt_seq.shape[1])
 
         targets = torch.nn.functional.embedding(tgt_seq, self.tgt_embedding)
         targets = targets * (self.hidden_size ** 0.5)
@@ -267,10 +262,8 @@ class DeepLSTM(modules.Module):
             [targets.new_zeros([targets.shape[0], 1, targets.shape[-1]]),
              targets[:, 1:, :]], dim=1)
 
-        # decoder_input = nn.functional.dropout(self.encoding(decoder_input),
-        #                                       self.dropout, self.training)
-
-        # dec_attn_bias = dec_attn_bias.to(targets)
+        encoder_output = state["encoder_output"]
+        tgt_bias = tgt_bias.to(targets)
 
         if mode == "infer":
             decoder_input = decoder_input[:, -1:, :]
@@ -279,8 +272,8 @@ class DeepLSTM(modules.Module):
         # encoder_output: [batch, length, hidden_size]
         # decoder_input: [batch, length, hidden_size]
         # decoder_output: [batch, length, hidden_size]
-        decoder_output = self.decoder(
-            decoder_input, encoder_output, batch_first=True)
+        decoder_output = self.decoder(decoder_input, src_bias, tgt_bias,
+                                      memory=encoder_output, batch_first=True)
 
         decoder_output = torch.reshape(decoder_output, [-1, self.hidden_size])
         decoder_output = torch.transpose(decoder_output, -1, -2)
@@ -288,13 +281,15 @@ class DeepLSTM(modules.Module):
         logits = torch.transpose(logits, 0, 1)
 
         # logits: [batch * length, tvoc_size]
-        return logits
+        return logits, state
 
     def forward(self, features, labels, mode="train", level="sentence"):
         mask = features["target_mask"]
 
-        encoder_output = self.encode(features)
-        logits = self.decode(features, encoder_output, mode=mode)
+        state = self.empty_state(features["target"].shape[0],
+                                 labels.device)
+        state = self.encode(features, state)
+        logits, _ = self.decode(features, state, mode=mode)
 
         loss = self.criterion(logits, labels)
         mask = mask.to(torch.float32)
@@ -311,6 +306,24 @@ class DeepLSTM(modules.Module):
 
         return (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
 
+    def empty_state(self, batch_size, device):
+        state = {}
+
+        return state
+
+    @staticmethod
+    def masking_bias(mask, inf=-1e9):
+        ret = (1.0 - mask) * inf
+
+        return torch.unsqueeze(torch.unsqueeze(ret, 1), 1)
+
+    @staticmethod
+    def causal_bias(length, inf=-1e9):
+        ret = torch.ones([length, length]) * inf
+        ret = torch.triu(ret, diagonal=1)
+
+        return torch.reshape(ret, [1, 1, length, length])
+
     @staticmethod
     def base_params():
         params = utils.HParams(
@@ -321,8 +334,8 @@ class DeepLSTM(modules.Module):
             hidden_size=512,
             filter_size=2048,
             num_heads=8,
-            num_encoder_layers=1,
-            num_decoder_layers=1,
+            num_encoder_layers=6,
+            num_decoder_layers=4,
             attention_dropout=0.0,
             residual_dropout=0.1,
             relu_dropout=0.0,
