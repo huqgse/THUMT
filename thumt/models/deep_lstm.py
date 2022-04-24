@@ -41,7 +41,7 @@ class DeepLSTMEncoderLayer(modules.Module):
 
         # lstm
         hiddens = []
-        for i in range(step) if reverse is False else reversed(range(step)):
+        for i in reversed(range(step)) if reverse is True else range(step):
             hidden, state = self.lstm(x[i], state)
 
             # hidden: [batch, hidden_size] -> [1, batch, hidden_size]
@@ -49,6 +49,8 @@ class DeepLSTMEncoderLayer(modules.Module):
             hiddens.append(hidden)
 
         # hiddens: [length, batch, hidden_size]
+        if reverse is True:
+            hiddens.reverse()
         hiddens = torch.cat(hiddens, dim=0)
 
         # ffn
@@ -63,6 +65,7 @@ class DeepLSTMDecoderLayer(nn.Module):
     def __init__(self, params, name="decoder_layer"):
         super(DeepLSTMDecoderLayer, self).__init__()
         self.dropout = params.residual_dropout
+        self.comb_mode = params.comb_mode
 
         with utils.scope(name):
             self.ffn = modules.FeedForward(params.hidden_size,
@@ -72,8 +75,9 @@ class DeepLSTMDecoderLayer(nn.Module):
             self.src_attention = modules.MultiHeadAttention(params.hidden_size,
                                                             params.num_heads,
                                                             params.attention_dropout)
-            # TODO: tgt-attention
-            # self.tgt_attention = modules.MultiHeadAttention()
+            self.tgt_attention = modules.MultiHeadAttention(params.hidden_size,
+                                                            params.num_heads,
+                                                            params.attention_dropout)
             self.lstm = modules.LSTMCell(params.hidden_size * 2,
                                          params.hidden_size,
                                          normalization=params.lstm_normalization)
@@ -95,15 +99,26 @@ class DeepLSTMDecoderLayer(nn.Module):
         batch = x.size(1)
         channel = x.size(2)
 
-        # TODO: tgt-attention
-        # TODO: mask
-
         # src-attention
         # x: [length, batch, hidden_size]
         # memory: [length, batch, hidden_size]
-        # c: [length, batch, hidden_size]
-        c = self.__attention(x, src_bias, memory)
+        # c_src: [length, batch, hidden_size]
+        c_src = self.__attention(x, src_bias, memory)
 
+        # tgt-attention
+        # x: [length, batch, hidden_size]
+        # memory: [length, batch, hidden_size]
+        # c_tgt: [length, batch, hidden_size]
+        c_tgt = self.__attention(x, tgt_bias, memory)
+
+        # if self.comb_mode == "sum":
+        #     pass
+        # elif self.comb_mode == "gate":
+        #     pass
+        # elif self.comb_mode == "hybird":
+        #     pass
+
+        c = c_src
         if state is None:
             h_zeros = torch.zeros(
                 batch, channel, dtype=x.dtype, device=x.device)
@@ -149,7 +164,7 @@ class DeepLSTMEncoder(modules.Module):
         state = None
         for i in range(len(self.layers)):
             x, state = self.layers[i](
-                x, state, reverse=False if i == 0 else True)
+                x, state, reverse=False if i % 2 == 0 else True)
 
         if batch_first:
             # x: [length, batch, hidden_size] -> [batch, length, hidden_size]
@@ -267,7 +282,7 @@ class DeepLSTM(modules.Module):
 
         if mode == "infer":
             decoder_input = decoder_input[:, -1:, :]
-            # dec_attn_bias = dec_attn_bias[:, :, -1:, :]
+            tgt_bias = tgt_bias[:, :, -1:, :]
 
         # encoder_output: [batch, length, hidden_size]
         # decoder_input: [batch, length, hidden_size]
@@ -308,20 +323,17 @@ class DeepLSTM(modules.Module):
 
     def empty_state(self, batch_size, device):
         state = {}
-
         return state
 
     @staticmethod
     def masking_bias(mask, inf=-1e9):
         ret = (1.0 - mask) * inf
-
         return torch.unsqueeze(torch.unsqueeze(ret, 1), 1)
 
     @staticmethod
     def causal_bias(length, inf=-1e9):
         ret = torch.ones([length, length]) * inf
         ret = torch.triu(ret, diagonal=1)
-
         return torch.reshape(ret, [1, 1, length, length])
 
     @staticmethod
@@ -333,7 +345,7 @@ class DeepLSTM(modules.Module):
             unk="<unk>",
             hidden_size=512,
             filter_size=2048,
-            num_heads=8,
+            num_heads=1,
             num_encoder_layers=6,
             num_decoder_layers=4,
             attention_dropout=0.0,
@@ -354,7 +366,8 @@ class DeepLSTM(modules.Module):
             adam_beta1=0.9,
             adam_beta2=0.98,
             adam_epsilon=1e-9,
-            clip_grad_norm=0.0
+            clip_grad_norm=0.0,
+            comb_mode="sum"
         )
 
         return params

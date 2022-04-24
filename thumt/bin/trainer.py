@@ -57,6 +57,9 @@ def parse_args(args=None):
                         help="Name of the model.")
     parser.add_argument("--parameters", type=str, default="",
                         help="Additional hyper-parameters.")
+    parser.add_argument("--comb_mode", type=str, default="sum",
+                        choices=["sum", "gate", "hybird"],
+                        help="Mode of combination of DHEA")
 
     return parser.parse_args(args)
 
