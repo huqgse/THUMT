@@ -363,7 +363,7 @@ def main(args):
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
     else:
         params.device = params.device_list[args.local_rank]
-        dist.init_process_group("nccl", init_method=args.url,
+        dist.init_process_group("gloo", init_method=args.url,
                                 rank=args.local_rank,
                                 world_size=len(params.device_list))
         torch.cuda.set_device(params.device_list[args.local_rank])

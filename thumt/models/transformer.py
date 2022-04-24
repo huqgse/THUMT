@@ -100,7 +100,7 @@ class TransformerDecoderLayer(modules.Module):
             self.self_attention = AttentionSubLayer(params,
                                                     name="self_attention")
             self.encdec_attention = AttentionSubLayer(params,
-                                                    name="encdec_attention")
+                                                      name="encdec_attention")
             self.feed_forward = FFNSubLayer(params)
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
@@ -314,7 +314,7 @@ class Transformer(modules.Module):
             if level == "sentence":
                 return -torch.sum(loss * mask, 1)
             else:
-                return  torch.exp(-loss) * mask - (1 - mask)
+                return torch.exp(-loss) * mask - (1 - mask)
 
         return (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
 

@@ -13,6 +13,7 @@ from thumt.modules.module import Module
 from thumt.modules.affine import Affine
 
 
+# ?
 class Attention(Module):
 
     def __init__(self, q_size, k_size, hidden_size, name="attention"):
@@ -44,9 +45,9 @@ class Attention(Module):
         # q: [batch, 1, hidden_size]
         # k: [batch, length, hidden_size]
         logits = self.v_transform(torch.tanh(q + k))
-        # [batch, length, 1]
+        # [batch, length, 1] -> [batch, 1, length]
         logits = torch.transpose(logits, 1, 2)
-        # [batch, 1, 1, length]
+        # [batch, 1, length] -> [batch, 1, 1, length]
         logits = torch.unsqueeze(logits, 2)
 
         if bias is not None:
@@ -92,6 +93,7 @@ class MultiHeadAttentionBase(Module):
         channels = x.shape[2]
 
         y = torch.reshape(x, [batch, length, heads, channels // heads])
+
         return torch.transpose(y, 2, 1)
 
     @staticmethod
@@ -129,6 +131,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         self.reset_parameters()
 
     def forward(self, query, bias, memory=None, kv=None):
+        # q: [batch, length, hidden_size]
         q = self.q_transform(query)
 
         if memory is not None:
@@ -138,10 +141,14 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                 k, v = None, None
 
             # encoder-decoder attention
+            # k: [batch, length, hidden_size]
+            # v: [batch, length, hidden_size]
             k = k or self.k_transform(memory)
             v = v or self.v_transform(memory)
         else:
             # self-attention
+            # k: [batch, length, hidden_size]
+            # v: [batch, length, hidden_size]
             k = self.k_transform(query)
             v = self.v_transform(query)
 
@@ -150,6 +157,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                 v = torch.cat([kv[1], v], dim=1)
 
         # split heads
+        # qh: [batch, head, length, hidden_size // head]
+        # kh: [batch, head, length, hidden_size // head]
+        # vh: [batch, head, length, hidden_size // head]
         qh = self.split_heads(q, self.num_heads)
         kh = self.split_heads(k, self.num_heads)
         vh = self.split_heads(v, self.num_heads)

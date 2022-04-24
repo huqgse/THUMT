@@ -4,12 +4,14 @@
 
 ## Contents
 
-* [Basics](#basics)
-  * [Prerequisite](#prerequisite)
-  * [Installation](#installation)
-  * [Features](#features)
-* [Walkthrough](#walkthrough)
-* [Benchmarks](#benchmarks)
+- [THUMT Documentation](#thumt-documentation)
+  - [Contents](#contents)
+  - [Basics](#basics)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+    - [Features](#features)
+  - [Walkthrough](#walkthrough)
+  - [Benchmarks](#benchmarks)
 
 ## Basics
 

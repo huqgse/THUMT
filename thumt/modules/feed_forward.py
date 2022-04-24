@@ -32,6 +32,7 @@ class FeedForward(Module):
 
         self.reset_parameters()
 
+    # max(0, xW1 + b1)W2 + b2
     def forward(self, x):
         h = nn.functional.relu(self.input_transform(x))
         h = nn.functional.dropout(h, self.dropout, self.training)
