@@ -30,14 +30,9 @@ class DeepLSTMEncoderLayer(modules.Module):
         # x: [length, batch, hidden_size]
         step = x.size(0)
         batch = x.size(1)
-        channel = x.size(2)
-
+        
         if state is None:
-            h_zeros = torch.zeros(
-                batch, channel, dtype=x.dtype, device=x.device)
-            c_zeros = torch.zeros(
-                batch, channel, dtype=x.dtype, device=x.device)
-            state = (c_zeros, h_zeros)
+            state = self.lstm.init_state(batch, dtype=x.dtype, device=x.device)
 
         # lstm
         hiddens = []
@@ -86,7 +81,8 @@ class DeepLSTMDecoderLayer(nn.Module):
         # query: [length, batch, hidden_size] -> [batch, length, hidden_size]
         # memory: [length, batch, hidden_size] -> [batch, length, hidden_size]
         query = torch.transpose(query, 0, 1)
-        memory = torch.transpose(memory, 0, 1)
+        if memory is not None:
+            memory = torch.transpose(memory, 0, 1)
 
         # c: [batch, length, hidden_size]
         c = self.src_attention(query, bias, memory)
@@ -97,7 +93,6 @@ class DeepLSTMDecoderLayer(nn.Module):
     def forward(self, x, src_bias, tgt_bias, memory=None, state=None):
         step = x.size(0)
         batch = x.size(1)
-        channel = x.size(2)
 
         # src-attention
         # x: [length, batch, hidden_size]
@@ -120,11 +115,7 @@ class DeepLSTMDecoderLayer(nn.Module):
 
         c = c_src
         if state is None:
-            h_zeros = torch.zeros(
-                batch, channel, dtype=x.dtype, device=x.device)
-            c_zeros = torch.zeros(
-                batch, channel, dtype=x.dtype, device=x.device)
-            state = (c_zeros, h_zeros)
+            state = self.lstm.init_state(batch, dtype=x.dtype, device=x.device)
 
         # ffn
         x = self.ffn(x)
@@ -133,7 +124,7 @@ class DeepLSTMDecoderLayer(nn.Module):
         # lstm
         hiddens = []
         for i in range(step):
-            # concat(ffn_output, c[i])
+            # concat(ffn_output, context)
             # hidden: [batch, hidden_size]
             hidden, state = self.lstm(torch.cat((x[i], c[i]), -1), state)
 
@@ -211,9 +202,7 @@ class DeepLSTM(modules.Module):
             self.encoder = DeepLSTMEncoder(params)
             self.decoder = DeepLSTMDecoder(params)
 
-        # for what?
-        self.criterion = modules.SmoothedCrossEntropyLoss(
-            params.label_smoothing)
+        self.criterion = modules.SmoothedCrossEntropyLoss(params.label_smoothing)
         self.dropout = params.residual_dropout
         self.hidden_size = params.hidden_size
         self.num_encoder_layers = params.num_encoder_layers
@@ -257,6 +246,7 @@ class DeepLSTM(modules.Module):
         inputs = inputs + self.embedding_bias
 
         # inputs: [batch, length, hidden_size]
+        # outputs: [batch, length, hidden_size]
         encoder_output = self.encoder(inputs, batch_first=True)
 
         state["encoder_output"] = encoder_output
