@@ -116,7 +116,7 @@ def default_params():
         eval_steps=2000,
         eval_secs=0,
         top_beams=1,
-        beam_size=4,
+        beam_size=8,
         decode_batch_size=32,
         decode_alpha=0.6,
         decode_ratio=1.0,

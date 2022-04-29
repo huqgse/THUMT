@@ -26,26 +26,23 @@ class DeepLSTMEncoderLayer(modules.Module):
                                            params.filter_size,
                                            dropout=params.relu_dropout)
 
-    def forward(self, x, state=None, reverse=False):
+    def forward(self, x, state=None):
         # x: [length, batch, hidden_size]
-        step = x.size(0)
-        batch = x.size(1)
+        steps = x.size(0)
+        batches = x.size(1)
         
         if state is None:
-            state = self.lstm.init_state(batch, dtype=x.dtype, device=x.device)
+            state = self.lstm.init_state(batches, dtype=x.dtype, device=x.device)
 
         # lstm
         hiddens = []
-        for i in reversed(range(step)) if reverse is True else range(step):
+        for i in range(steps):
             hidden, state = self.lstm(x[i], state)
 
             # hidden: [batch, hidden_size] -> [1, batch, hidden_size]
             hidden = torch.unsqueeze(hidden, dim=0)
             hiddens.append(hidden)
 
-        # hiddens: [length, batch, hidden_size]
-        if reverse is True:
-            hiddens.reverse()
         hiddens = torch.cat(hiddens, dim=0)
 
         # ffn
@@ -73,13 +70,14 @@ class DeepLSTMDecoderLayer(nn.Module):
             self.tgt_attention = modules.MultiHeadAttention(params.hidden_size,
                                                             params.num_heads,
                                                             params.attention_dropout)
-            self.lstm = modules.LSTMCell(params.hidden_size * 2,
+
+            # x + context
+            self.lstm = modules.LSTMCell(params.hidden_size + params.hidden_size,
                                          params.hidden_size,
                                          normalization=params.lstm_normalization)
 
-    def __attention(self, query, bias, memory=None):
-        # query: [length, batch, hidden_size] -> [batch, length, hidden_size]
-        # memory: [length, batch, hidden_size] -> [batch, length, hidden_size]
+    def _attention(self, query, bias, memory=None):
+        # query, memory: [length, batch, hidden_size] -> [batch, length, hidden_size]
         query = torch.transpose(query, 0, 1)
         if memory is not None:
             memory = torch.transpose(memory, 0, 1)
@@ -90,50 +88,45 @@ class DeepLSTMDecoderLayer(nn.Module):
         # c: [batch, length, hidden_size] -> [length, batch, hidden_size]
         return torch.transpose(c, 0, 1)
 
+    def _comb(self, c_src, c_tgt, mode="sum"):
+        if self.comb_mode == "sum":
+            return c_src + c_tgt
+        elif self.comb_mode == "gate":
+            pass
+        elif self.comb_mode == "hybird":
+            pass
+
     def forward(self, x, src_bias, tgt_bias, memory=None, state=None):
-        step = x.size(0)
-        batch = x.size(1)
+        # x, memory, c: [length, batch, hidden_size]
+        steps = x.size(0)
+        batches = x.size(1)
 
         # src-attention
-        # x: [length, batch, hidden_size]
-        # memory: [length, batch, hidden_size]
-        # c_src: [length, batch, hidden_size]
-        c_src = self.__attention(x, src_bias, memory)
-
+        c_src = self._attention(x, src_bias, memory)
         # tgt-attention
-        # x: [length, batch, hidden_size]
-        # memory: [length, batch, hidden_size]
-        # c_tgt: [length, batch, hidden_size]
-        c_tgt = self.__attention(x, tgt_bias, memory)
+        c_tgt = self._attention(x, tgt_bias, memory=None)
+        # comb
+        c = self._comb(c_src, c_tgt, mode=self.comb_mode)
 
-        # if self.comb_mode == "sum":
-        #     pass
-        # elif self.comb_mode == "gate":
-        #     pass
-        # elif self.comb_mode == "hybird":
-        #     pass
-
-        c = c_src
         if state is None:
-            state = self.lstm.init_state(batch, dtype=x.dtype, device=x.device)
-
-        # ffn
-        x = self.ffn(x)
-        x = nn.functional.dropout(x, self.dropout, self.training)
+            state = self.lstm.init_state(batches, dtype=x.dtype, device=x.device)
 
         # lstm
         hiddens = []
-        for i in range(step):
+        for i in range(steps):
             # concat(ffn_output, context)
-            # hidden: [batch, hidden_size]
             hidden, state = self.lstm(torch.cat((x[i], c[i]), -1), state)
 
             # hidden: [batch, hidden_size] -> [1, batch, hidden_size]
             hidden = torch.unsqueeze(hidden, dim=0)
             hiddens.append(hidden)
 
-        # hiddens: [length, batch, hidden_size]
         hiddens = torch.cat(hiddens, dim=0)
+
+        # ffn
+        hiddens = self.ffn(hiddens)
+        hiddens = nn.functional.dropout(hiddens, self.dropout, self.training)
+
         return hiddens, state
 
 
@@ -154,8 +147,11 @@ class DeepLSTMEncoder(modules.Module):
 
         state = None
         for i in range(len(self.layers)):
-            x, state = self.layers[i](
-                x, state, reverse=False if i % 2 == 0 else True)
+            if i % 2 == 0:
+                x, state = self.layers[i](x, state)
+            else:
+                x, state = self.layers[i](torch.flip(x, dims=[0]), state)
+                torch.flip(x, dims=[0])
 
         if batch_first:
             # x: [length, batch, hidden_size] -> [batch, length, hidden_size]
@@ -175,11 +171,11 @@ class DeepLSTMDecoder(modules.Module):
                 for i in range(params.num_decoder_layers)])
 
     def forward(self, x, src_bias, tgt_bias, memory=None, batch_first=False):
+        # x, memory: [batch, length, hidden_size] -> [length, batch, hidden_size]
         if batch_first:
-            # x: [batch, length, hidden_size] -> [length, batch, hidden_size]
             x = torch.transpose(x, 0, 1)
-            # memory: [batch, length, hidden_size] -> [length, batch, hidden_size]
-            memory = torch.transpose(memory, 0, 1)
+            if memory is not None:
+                memory = torch.transpose(memory, 0, 1)
 
         state = None
         for i in range(len(self.layers)):
@@ -245,8 +241,7 @@ class DeepLSTM(modules.Module):
         inputs = inputs * (self.hidden_size ** 0.5)
         inputs = inputs + self.embedding_bias
 
-        # inputs: [batch, length, hidden_size]
-        # outputs: [batch, length, hidden_size]
+        # inputs, outputs: [batch, length, hidden_size]
         encoder_output = self.encoder(inputs, batch_first=True)
 
         state["encoder_output"] = encoder_output
@@ -274,9 +269,7 @@ class DeepLSTM(modules.Module):
             decoder_input = decoder_input[:, -1:, :]
             tgt_bias = tgt_bias[:, :, -1:, :]
 
-        # encoder_output: [batch, length, hidden_size]
-        # decoder_input: [batch, length, hidden_size]
-        # decoder_output: [batch, length, hidden_size]
+        # encoder_output, decoder_input, decoder_output: [batch, length, hidden_size]
         decoder_output = self.decoder(decoder_input, src_bias, tgt_bias,
                                       memory=encoder_output, batch_first=True)
 
@@ -291,8 +284,7 @@ class DeepLSTM(modules.Module):
     def forward(self, features, labels, mode="train", level="sentence"):
         mask = features["target_mask"]
 
-        state = self.empty_state(features["target"].shape[0],
-                                 labels.device)
+        state = self.empty_state(features["target"].shape[0], labels.device)
         state = self.encode(features, state)
         logits, _ = self.decode(features, state, mode=mode)
 
