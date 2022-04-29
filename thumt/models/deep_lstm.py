@@ -236,24 +236,28 @@ class DeepLSTM(modules.Module):
 
     def encode(self, features, state):
         src_seq = features["source"]
+        src_mask = features["source_mask"]
+        src_attn_bias = self.masking_bias(src_mask)
 
         inputs = torch.nn.functional.embedding(src_seq, self.src_embedding)
         inputs = inputs * (self.hidden_size ** 0.5)
         inputs = inputs + self.embedding_bias
 
+        src_attn_bias = src_attn_bias.to(inputs)
+
         # inputs, outputs: [batch, length, hidden_size]
         encoder_output = self.encoder(inputs, batch_first=True)
 
         state["encoder_output"] = encoder_output
+        state["src_attn_bias"] = src_attn_bias
 
         return state
 
     def decode(self, features, state, mode="infer"):
         tgt_seq = features["target"]
-        src_mask = features["source_mask"]
 
-        src_bias = self.masking_bias(src_mask)
-        tgt_bias = self.causal_bias(tgt_seq.shape[1])
+        src_attn_bias = state["src_attn_bias"]
+        tgt_attn_bias = self.causal_bias(tgt_seq.shape[1])
 
         targets = torch.nn.functional.embedding(tgt_seq, self.tgt_embedding)
         targets = targets * (self.hidden_size ** 0.5)
@@ -263,14 +267,14 @@ class DeepLSTM(modules.Module):
              targets[:, 1:, :]], dim=1)
 
         encoder_output = state["encoder_output"]
-        tgt_bias = tgt_bias.to(targets)
+        tgt_attn_bias = tgt_attn_bias.to(targets)
 
         if mode == "infer":
             decoder_input = decoder_input[:, -1:, :]
-            tgt_bias = tgt_bias[:, :, -1:, :]
+            tgt_attn_bias = tgt_attn_bias[:, :, -1:, :]
 
         # encoder_output, decoder_input, decoder_output: [batch, length, hidden_size]
-        decoder_output = self.decoder(decoder_input, src_bias, tgt_bias,
+        decoder_output = self.decoder(decoder_input, src_attn_bias, tgt_attn_bias,
                                       memory=encoder_output, batch_first=True)
 
         decoder_output = torch.reshape(decoder_output, [-1, self.hidden_size])
