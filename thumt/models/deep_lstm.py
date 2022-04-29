@@ -116,10 +116,12 @@ class DeepLSTMDecoderLayer(nn.Module):
 
         hiddens = []
         for i in range(steps):
-            # concat(ffn_output, context)
+            # input: [x, context]
             hidden, next_state = self.lstm(torch.cat((x[i], c[i]), -1), next_state)
+
             if not self.training:
                 state['next_state'] = next_state
+
             # hidden: [batch, hidden_size] -> [1, batch, hidden_size]
             hidden = torch.unsqueeze(hidden, dim=0)
             hiddens.append(hidden)
