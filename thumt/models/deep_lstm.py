@@ -101,7 +101,7 @@ class DeepLSTMDecoderLayer(nn.Module):
             c_tgt = self.tgt_attention(query, tgt_bias, memory=None, kv=None)
         else:
             kv = [state["k"], state["v"]]
-            c_tgt, k, v = self.attention(query, tgt_bias, memory=None, kv=kv)
+            c_tgt, k, v = self.tgt_attention(query, tgt_bias, memory=None, kv=kv)
             state["k"], state["v"] = k, v
         # c_tgt: [batch, length, hidden_size] -> [length, batch, hidden_size]
         c_tgt = torch.transpose(c_tgt, 0, 1)
