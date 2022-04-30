@@ -42,7 +42,7 @@ class LSTMLayer(modules.Module):
         for i in range(steps):
             hidden, lstm_state = self.lstm_cell(input[i], lstm_state)
 
-            if not self.training:
+            if not self.training and state is not None:
                 state['lstm_state'] = lstm_state
 
             # hidden: [batch, hidden_size] -> [1, batch, hidden_size]
