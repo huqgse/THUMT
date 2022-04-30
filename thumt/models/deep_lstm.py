@@ -102,8 +102,9 @@ class DeepLSTMEncoder(modules.Module):
             if i % 2 == 0:
                 x, init_state = self.layers[i](x, init_state, batch_first)
             else:
-                x, init_state = self.layers[i](torch.flip(x, dims=[0]), init_state, batch_first)
-                x = torch.flip(x, dims=[0])
+                # x: [batch, length, hidden_size]
+                x, init_state = self.layers[i](torch.flip(x, dims=[1]), init_state, batch_first)
+                x = torch.flip(x, dims=[1])
 
         return x
 
