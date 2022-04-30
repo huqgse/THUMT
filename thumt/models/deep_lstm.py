@@ -33,8 +33,8 @@ class LSTMLayer(modules.Module):
 
         if self.training or state is None:
             lstm_state = init_state or self.lstm_cell.init_state(batches,
-                                                            dtype=input.dtype,
-                                                            device=input.device)
+                                                                 dtype=input.dtype,
+                                                                 device=input.device)
         else:
             lstm_state = state['lstm_state']
 
@@ -46,8 +46,7 @@ class LSTMLayer(modules.Module):
                 state['lstm_state'] = lstm_state
 
             # hidden: [batch, hidden_size] -> [1, batch, hidden_size]
-            hidden = torch.unsqueeze(hidden, dim=0)
-            hiddens.append(hidden)
+            hiddens.append(torch.unsqueeze(hidden, dim=0))
 
         # hiddens: [length, batch, hidden_size]
         hiddens = torch.cat(hiddens, dim=0)
