@@ -109,7 +109,7 @@ class DeepLSTMEncoder(modules.Module):
         return x
 
 
-class DeepLSTMDecoderLayer(nn.Module):
+class DeepLSTMDecoderLayer(modules.Module):
 
     def __init__(self, params, name="decoder_layer"):
         super(DeepLSTMDecoderLayer, self).__init__()
@@ -143,8 +143,7 @@ class DeepLSTMDecoderLayer(nn.Module):
             pass
 
     def forward(self, x, src_bias, tgt_bias, memory=None, state=None, batch_first=True):
-        # x, memory: [batch, length, hidden_size]
-        # c_src, c_tgt: [batch, length, hidden_size]
+        # x, memory, c: [batch, length, hidden_size]
 
         # src-attention
         c_src = self.src_attention(x, src_bias, memory, kv=None)
